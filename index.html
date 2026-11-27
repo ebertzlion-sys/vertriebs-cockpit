@@ -134,6 +134,9 @@ td.date-c .cell { font-family: var(--font-mono); font-size: 12px; }
 .date-wrap .cell { flex: 1; }
 .cal-btn { border: 1px solid var(--line); background: var(--surface); color: var(--accent); border-radius: 6px; font-size: 11px; font-weight: 600; padding: 3px 6px; margin-right: 4px; white-space: nowrap; }
 .cal-btn:hover { background: var(--accent-soft); }
+/* Leere Datumsfelder: Safari (iPad/Mac) zeigt sonst das heutige Datum an, obwohl nichts eingetragen ist */
+input[type="date"].is-empty:not(:focus) { color: transparent; -webkit-text-fill-color: transparent; }
+input[type="date"].is-empty:not(:focus)::-webkit-datetime-edit { color: transparent; -webkit-text-fill-color: transparent; }
 .cal-pop { position: fixed; z-index: 1000; width: 240px; max-width: calc(100vw - 16px); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,.18); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
 .cal-pop-h { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
 .cal-pop-h span { color: var(--muted, #667); white-space: nowrap; }
@@ -1553,6 +1556,13 @@ window.KONTAKT_CONFIG = {
   // ---------- Kalender ----------
   function icsText(s) { return String(s || "").replace(/\\/g, "\\\\").replace(/\r?\n/g, "\\n").replace(/[,;]/g, (m) => "\\" + m); }
   function icsFold(line) { const out = []; while (line.length > 74) { out.push(line.slice(0, 74)); line = " " + line.slice(74); } out.push(line); return out.join("\r\n"); }
+  // Leere Datumsfelder als leer kennzeichnen (CSS blendet dann das von Safari angezeigte Heute-Datum aus)
+  const markDate = (el) => el.classList.toggle("is-empty", !el.value);
+  const markDates = (root) => { if (root.matches && root.matches('input[type="date"]')) markDate(root); if (root.querySelectorAll) root.querySelectorAll('input[type="date"]').forEach(markDate); };
+  ["input", "change", "blur"].forEach((ev) => document.addEventListener(ev, (e) => { if (e.target.matches && e.target.matches('input[type="date"]')) markDate(e.target); }, true));
+  new MutationObserver((ms) => { for (const m of ms) { if (m.type === "attributes") markDates(m.target); else m.addedNodes.forEach((n) => n.nodeType === 1 && markDates(n)); } })
+    .observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["value"] });
+  markDates(document.body);
   function calPopClose() { const p = $("calPop"); if (p) p.remove(); }
   function calPopOpen(id, btn) {
     const c = S.contacts.get(id); if (!c) return;
