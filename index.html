@@ -706,12 +706,19 @@ window.KONTAKT_CONFIG = {
     S.fields = a.filter((f) => f.kind !== "liste" && f.kind !== "farben");
     setCustomLists(a.filter((f) => f.kind === "liste"));
     const cn = a.find((f) => f.kind === "farben");
-    S.colorNames = cn && cn.names && typeof cn.names === "object" ? { ...cn.names } : {};
+    // Farbnamen pro Liste: {listId: {farbe: name}}. Ältere, gemeinsame Namen (names) gelten für jede Liste weiter.
+    S.colorNames = {};
+    if (cn && cn.lists && typeof cn.lists === "object") for (const [l, m] of Object.entries(cn.lists)) S.colorNames[l] = { ...(m || {}) };
+    else if (cn && cn.names && typeof cn.names === "object") for (const l of LISTS) S.colorNames[l.id] = { ...cn.names };
   }
   // Eigene Namen für die Farben liegen als Eintrag {kind:"farben", names:{rot:"…"}} in field_settings.fields (keine DB-Änderung).
   function allSettings() {
-    const names = Object.fromEntries(Object.entries(S.colorNames || {}).filter(([, v]) => v && v.trim()));
-    return [...S.fields, ...S.customLists, ...(Object.keys(names).length ? [{ id: "farben", kind: "farben", names }] : [])];
+    const lists = {};
+    for (const [l, m] of Object.entries(S.colorNames || {})) {
+      const clean = Object.fromEntries(Object.entries(m || {}).filter(([, v]) => v && v.trim()));
+      if (Object.keys(clean).length) lists[l] = clean;
+    }
+    return [...S.fields, ...S.customLists, ...(Object.keys(lists).length ? [{ id: "farben", kind: "farben", lists }] : [])];
   }
   const uid8 = () => Math.random().toString(36).slice(2, 10);
   const newId = () => (crypto.randomUUID ? crypto.randomUUID() : "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) => (c ^ (Math.random() * 16) >> (c / 4)).toString(16)));
@@ -859,19 +866,23 @@ window.KONTAKT_CONFIG = {
   function setVal(c, key, v) { if (key.startsWith("c:")) c.custom = { ...(c.custom || {}), [key.slice(2)]: v }; else c[key] = v; }
   function inList(listId) { return [...S.contacts.values()].filter((c) => (c.lists || []).includes(listId)); }
   const COLL = new Intl.Collator("de", { sensitivity: "base" });
-  // Farbe pro Kontakt: färbt nur die Namens-Zelle. Liegt in custom._color, damit keine Datenbankänderung nötig ist.
+  // Farbe pro Kontakt und Liste: färbt nur die Namens-Zelle. Liegt in custom._colors {listId: farbe}, damit keine Datenbankänderung nötig ist.
+  // Ältere Einträge (custom._color) gelten in allen Listen, bis in einer Liste eine Farbe geändert wird.
   const NAME_COLORS = [
     { id: "rot", label: "Rot", hex: "#e5484d" }, { id: "orange", label: "Orange", hex: "#f76b15" }, { id: "gelb", label: "Gelb", hex: "#f1c40f" },
     { id: "gruen", label: "Grün", hex: "#30a46c" }, { id: "tuerkis", label: "Türkis", hex: "#12a5a0" }, { id: "blau", label: "Blau", hex: "#3e63dd" },
     { id: "lila", label: "Lila", hex: "#8e4ec6" }, { id: "pink", label: "Pink", hex: "#d6409f" }, { id: "grau", label: "Grau", hex: "#8b8d98" },
   ];
-  function colLabel(x) { const n = (S.colorNames || {})[x.id]; return n && n.trim() ? n.trim() : x.label; }
-  function nameColor(c) { const k = (c.custom || {})._color; return NAME_COLORS.find((x) => x.id === k) || null; }
-  function colorRank(c) { const i = NAME_COLORS.findIndex((x) => x.id === (c.custom || {})._color); return i < 0 ? 99 : i; }
+  function colLabel(x, list = S.list) { const n = ((S.colorNames || {})[list] || {})[x.id]; return n && n.trim() ? n.trim() : x.label; }
+  function colorOf(c, list = S.list) { const cu = c.custom || {}; return cu._colors && typeof cu._colors === "object" ? cu._colors[list] || "" : cu._color || ""; }
+  function nameColor(c, list) { const k = colorOf(c, list); return NAME_COLORS.find((x) => x.id === k) || null; }
+  function colorRank(c) { const i = NAME_COLORS.findIndex((x) => x.id === colorOf(c)); return i < 0 ? 99 : i; }
   function setNameColor(id, key, quiet) {
     const c = S.contacts.get(id); if (!c || !S.canEdit) return;
     const cu = { ...(c.custom || {}) };
-    if (key) cu._color = key; else delete cu._color;
+    const m = cu._colors && typeof cu._colors === "object" ? { ...cu._colors } : cu._color ? Object.fromEntries((c.lists || []).map((l) => [l, cu._color])) : {};
+    if (key) m[S.list] = key; else delete m[S.list];
+    cu._colors = m; delete cu._color;
     c.custom = cu;
     saveContact(id, 0);
     if (!quiet) renderAll();
@@ -881,8 +892,8 @@ window.KONTAKT_CONFIG = {
     let rows = inList(S.list);
     if (S.soz) rows = rows.filter((c) => (c.soziotop || "") === S.soz);
     if (S.dueOnly) rows = rows.filter(isDue);
-    if (S.color) rows = rows.filter((c) => S.color === "none" ? !nameColor(c) : (c.custom || {})._color === S.color);
-    if (q) rows = rows.filter((c) => [c.name, c.soziotop, c.beruf, c.info, c.nextStep, ...Object.entries(c.custom || {}).filter(([k]) => k !== "_color").map(([, v]) => v)].join(" ").toLowerCase().includes(q));
+    if (S.color) rows = rows.filter((c) => S.color === "none" ? !nameColor(c) : colorOf(c) === S.color);
+    if (q) rows = rows.filter((c) => [c.name, c.soziotop, c.beruf, c.info, c.nextStep, ...Object.entries(c.custom || {}).filter(([k]) => k !== "_color" && k !== "_colors").map(([, v]) => v)].join(" ").toLowerCase().includes(q));
     const by = {
       name: (a, b) => COLL.compare(a.name || "", b.name || ""),
       next: (a, b) => { const x = a.nextDate || "9999", y = b.nextDate || "9999"; return x < y ? -1 : x > y ? 1 : by.name(a, b); },
@@ -1260,8 +1271,8 @@ window.KONTAKT_CONFIG = {
         <div class="grid2">${dField(c, id, "c:_service", "Service-Termin", SERVICE_FIELD)}${dField(c, id, "c:_serviceNext", "Nächster Service (automatisch +6 Monate)", SERVICE_FIELD)}</div>
         <div class="cal-bar"><button class="btn" type="button" data-svcal="${id}" ${serviceNext(c) ? "" : "disabled"}>Nächsten Service in Kalender</button><span class="hint">Trag nach jedem Service das neue Datum ein, der nächste Termin rückt dann automatisch nach.</span></div>` : ""}
         ${custom.length ? `<h3 class="section-title">Eigene Felder</h3>` + custom.map((f) => dField(c, id, "c:" + f.id, f.label, f)).join("") : ""}
-        <h3 class="section-title">Farbe</h3>
-        <div class="dcolors">${NAME_COLORS.map((x) => `<button type="button" class="cchip" style="--nc: ${x.hex}" data-dcolor="${id}" data-c="${x.id}" aria-pressed="${(c.custom || {})._color === x.id}" ${dis}><span class="dot"></span>${esc(colLabel(x))}</button>`).join("")}<button type="button" class="cchip" data-dcolor="${id}" data-c="" aria-pressed="${!nameColor(c)}" ${dis}><span class="dot none"></span>Keine Farbe</button></div>
+        <h3 class="section-title">Farbe in der ${esc(listById(S.list).label)}</h3>
+        <div class="dcolors">${NAME_COLORS.map((x) => `<button type="button" class="cchip" style="--nc: ${x.hex}" data-dcolor="${id}" data-c="${x.id}" aria-pressed="${colorOf(c) === x.id}" ${dis}><span class="dot"></span>${esc(colLabel(x))}</button>`).join("")}<button type="button" class="cchip" data-dcolor="${id}" data-c="" aria-pressed="${!nameColor(c)}" ${dis}><span class="dot none"></span>Keine Farbe</button></div>
         <h3 class="section-title">Listen</h3>
         ${S.canEdit ? `<p class="hint">Antippen, um den Kontakt in eine Liste aufzunehmen oder herauszunehmen. Ein Kontakt kann in mehreren Listen stehen.</p>` : ""}
         <div class="lists" style="padding:0;flex-wrap:wrap">${LISTS.map((l) => `<button type="button" class="lchip wide" style="--c: ${lc(l)}" data-toggle="${id}" data-list="${l.id}" aria-pressed="${c.lists.includes(l.id)}" ${dis}>${esc(l.label)}</button>`).join("")}</div>
@@ -2724,11 +2735,11 @@ window.KONTAKT_CONFIG = {
     const renameLink = S.canEdit ? `<button type="button" class="crename-link" data-crename="1">Farben umbenennen …</button>` : "";
     if (mode === "set") {
       const c = S.contacts.get(id); if (!c) return;
-      const cur = (c.custom || {})._color || "";
+      const cur = colorOf(c);
       cpop.setAttribute("aria-label", "Farbe wählen");
       cpop.innerHTML = `<h4>Farbe für ${esc(c.name || "Kontakt")}</h4><div class="clist">${NAME_COLORS.map((x) => `<button type="button" data-pick="${x.id}" data-pid="${id}" aria-pressed="${cur === x.id}"><span class="dot" style="--nc: ${x.hex}"></span><span>${esc(colLabel(x))}</span></button>`).join("")}<button type="button" data-pick="" data-pid="${id}" aria-pressed="${!cur}"><span class="dot none"></span><span>Keine Farbe</span></button></div>${renameLink}`;
     } else {
-      const inL = inList(S.list), cnt = (k) => inL.filter((c) => k === "none" ? !nameColor(c) : (c.custom || {})._color === k).length;
+      const inL = inList(S.list), cnt = (k) => inL.filter((c) => k === "none" ? !nameColor(c) : colorOf(c) === k).length;
       const row = (val, dot, label, n) => `<button type="button" data-fpick="${val}" aria-pressed="${S.color === val}" class="${n === 0 ? "zero" : ""}">${dot}<span>${esc(label)}</span>${n == null ? "" : `<span class="n">${n}</span>`}</button>`;
       cpop.setAttribute("aria-label", "Nach Farbe filtern");
       cpop.innerHTML = `<h4>Nach Farbe filtern</h4><div class="clist">${row("", `<span class="dot all"></span>`, "Alle Farben", inL.length)}${NAME_COLORS.map((x) => row(x.id, `<span class="dot" style="--nc: ${x.hex}"></span>`, colLabel(x), cnt(x.id))).join("")}${row("none", `<span class="dot none"></span>`, "Ohne Farbe", cnt("none"))}</div>${renameLink}`;
@@ -2737,7 +2748,7 @@ window.KONTAKT_CONFIG = {
   }
   function renameColorsPop() {
     cpop.setAttribute("aria-label", "Farben umbenennen");
-    cpop.innerHTML = `<h4>Farben umbenennen</h4><div class="crename">${NAME_COLORS.map((x) => `<label><span class="dot" style="--nc: ${x.hex}"></span><input type="text" data-cname="${x.id}" value="${esc((S.colorNames || {})[x.id] || "")}" placeholder="${esc(x.label)}" maxlength="30" aria-label="Name für ${esc(x.label)}"></label>`).join("")}</div><p class="chint">Leer lassen für den Standardnamen. Wird automatisch gespeichert.</p><button type="button" class="btn primary cdone" data-cdone="1">Fertig</button>`;
+    cpop.innerHTML = `<h4>Farbnamen · ${esc(listById(S.list).label)}</h4><div class="crename">${NAME_COLORS.map((x) => `<label><span class="dot" style="--nc: ${x.hex}"></span><input type="text" data-cname="${x.id}" value="${esc(((S.colorNames || {})[S.list] || {})[x.id] || "")}" placeholder="${esc(x.label)}" maxlength="30" aria-label="Name für ${esc(x.label)}"></label>`).join("")}</div><p class="chint">Gilt nur für diese Liste. Leer lassen für den Standardnamen. Wird automatisch gespeichert.</p><button type="button" class="btn primary cdone" data-cdone="1">Fertig</button>`;
     showColorPop(cpopAnchor);
     cpop.querySelector("input")?.focus({ preventScroll: true });
   }
@@ -2762,7 +2773,7 @@ window.KONTAKT_CONFIG = {
   let cnameTimer = null;
   cpop.addEventListener("input", (e) => {
     const k = e.target.dataset.cname; if (!k || !S.canEdit) return;
-    S.colorNames = { ...(S.colorNames || {}), [k]: e.target.value };
+    S.colorNames = { ...(S.colorNames || {}), [S.list]: { ...((S.colorNames || {})[S.list] || {}), [k]: e.target.value } };
     clearTimeout(cnameTimer);
     cnameTimer = setTimeout(() => { saveSettings(); renderAll(); }, 600);
   });
