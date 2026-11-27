@@ -701,7 +701,7 @@ window.KONTAKT_CONFIG = {
   const S = {
     sb: null, session: null, me: null,
     view: "list", owner: null, ownerName: "", canEdit: false,
-    contacts: new Map(), fields: [], customLists: [], colorNames: {}, colOrder: [], loadedContacts: false, channel: null,
+    contacts: new Map(), fields: [], customLists: [], colorNames: {}, colOrder: [], colOrders: {}, loadedContacts: false, channel: null,
     list: "haupt", q: "", soz: "", color: "", sort: "name", dueOnly: false,
     selected: new Set(), panel: null, openId: null,
     team: [], users: [], access: [],
@@ -721,6 +721,8 @@ window.KONTAKT_CONFIG = {
     S.fields = a.filter((f) => f.kind !== "liste" && f.kind !== "farben" && f.kind !== "spalten");
     const so = a.find((f) => f.kind === "spalten");
     S.colOrder = so && Array.isArray(so.order) ? so.order.filter((k) => typeof k === "string") : [];
+    S.colOrders = {};
+    if (so && so.lists && typeof so.lists === "object") for (const [l, o] of Object.entries(so.lists)) if (Array.isArray(o)) S.colOrders[l] = o.filter((k) => typeof k === "string");
     setCustomLists(a.filter((f) => f.kind === "liste"));
     const cn = a.find((f) => f.kind === "farben");
     // Farbnamen pro Liste: {listId: {farbe: name}}. Ältere, gemeinsame Namen (names) gelten für jede Liste weiter.
@@ -736,7 +738,7 @@ window.KONTAKT_CONFIG = {
       if (Object.keys(clean).length) lists[l] = clean;
     }
     return [...S.fields, ...S.customLists, ...(Object.keys(lists).length ? [{ id: "farben", kind: "farben", lists }] : []),
-      ...(S.colOrder && S.colOrder.length ? [{ id: "spalten", kind: "spalten", order: S.colOrder }] : [])];
+      ...((S.colOrder && S.colOrder.length) || Object.keys(S.colOrders || {}).length ? [{ id: "spalten", kind: "spalten", order: S.colOrder || [], lists: S.colOrders || {} }] : [])];
   }
   const uid8 = () => Math.random().toString(36).slice(2, 10);
   const newId = () => (crypto.randomUUID ? crypto.randomUUID() : "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) => (c ^ (Math.random() * 16) >> (c / 4)).toString(16)));
@@ -816,7 +818,7 @@ window.KONTAKT_CONFIG = {
   async function openOwner(ownerId, name, canEdit) {
     if (S.channel) { S.sb.removeChannel(S.channel); S.channel = null; }
     S.owner = ownerId; S.ownerName = name; S.canEdit = canEdit;
-    S.contacts = new Map(); S.fields = []; S.colOrder = []; setCustomLists([]); S.loadedContacts = false; S.selected.clear();
+    S.contacts = new Map(); S.fields = []; S.colOrder = []; S.colOrders = {}; setCustomLists([]); S.loadedContacts = false; S.selected.clear();
     S.view = "list"; S.list = "haupt"; S.q = ""; S.soz = ""; S.dueOnly = false; $("q").value = "";
     renderAll();
     const [{ data: fs }, rows] = await Promise.all([
@@ -1127,10 +1129,15 @@ window.KONTAKT_CONFIG = {
   // Spalten-Reihenfolge: gespeichert als {kind:"spalten", order:[Schlüssel]} in field_settings.fields (keine DB-Änderung).
   // Name bleibt immer vorne (fixiert). Spalten, die in der Reihenfolge noch fehlen (z. B. neue Felder), kommen an ihre Standardstelle.
   const BASE_COLS = [["lists", "Listen"], ["soziotop", "Soziotop"], ["beruf", "Beruf"], ["info", "Informationen"], ["nextStep", "Next Step"], ["nextDate", "Fällig am"], ["c:_service", "Service-Termin"], ["c:_serviceNext", "Nächster Service"]];
-  function allColumns() { return [...BASE_COLS.map(([k, l]) => ({ key: k, label: l, kunden: k.startsWith("c:_") })), ...S.fields.map((f) => ({ key: "c:" + f.id, label: f.label, custom: true }))]; }
-  function orderCols(keys) {
+  // Reihenfolge gilt pro Liste (lists[listId]); ältere gemeinsame Reihenfolge (order) dient als Startwert für Listen ohne eigene.
+  function listColumns(list = S.list) {
+    return [...BASE_COLS.filter(([k]) => list === "kunden" || !k.startsWith("c:_")).map(([k, l]) => ({ key: k, label: l, kunden: k.startsWith("c:_") })),
+      ...fieldsFor(list).map((f) => ({ key: "c:" + f.id, label: f.label, custom: true }))];
+  }
+  function curOrder(list = S.list) { return (S.colOrders || {})[list] || S.colOrder || []; }
+  function orderCols(keys, list = S.list) {
     const set = new Set(keys);
-    const res = (S.colOrder || []).filter((k, i, a) => set.has(k) && a.indexOf(k) === i);
+    const res = curOrder(list).filter((k, i, a) => set.has(k) && a.indexOf(k) === i);
     keys.forEach((k, i) => {
       if (res.includes(k)) return;
       let pos = 0;
@@ -1142,10 +1149,10 @@ window.KONTAKT_CONFIG = {
   // Verschiebt Spalte "from" vor bzw. hinter Spalte "to" und speichert die Reihenfolge über alle Spalten (auch die anderer Listen).
   function moveCol(from, to, after) {
     if (from === to) return;
-    const order = orderCols(allColumns().map((c) => c.key)).filter((k) => k !== from);
+    const order = orderCols(listColumns().map((c) => c.key)).filter((k) => k !== from);
     let at = order.indexOf(to); if (at < 0) return;
     order.splice(after ? at + 1 : at, 0, from);
-    S.colOrder = order;
+    S.colOrders = { ...(S.colOrders || {}), [S.list]: order };
     saveSettings(); renderTable();
     if (S.panel === "fields") renderPanel();
   }
@@ -1331,15 +1338,15 @@ window.KONTAKT_CONFIG = {
       <div class="drawer-foot">${S.canEdit ? `<button class="btn danger" type="button" data-del="${id}">Kontakt löschen</button>` : ""}<span class="spacer"></span><button class="btn primary" type="button" data-act="close">Fertig</button></div>`;
   }
   function colOrderSection() {
-    const cols = allColumns(), byKey = Object.fromEntries(cols.map((c) => [c.key, c]));
+    const cols = listColumns(), byKey = Object.fromEntries(cols.map((c) => [c.key, c]));
     const order = orderCols(cols.map((c) => c.key));
-    const items = order.map((k, i) => { const c = byKey[k]; return `<div class="corow"><span>${esc(c.label)}</span>${c.kunden ? "<em>nur Kundenliste</em>" : c.custom ? "<em>eigenes Feld</em>" : ""}
+    const items = order.map((k, i) => { const c = byKey[k]; return `<div class="corow"><span>${esc(c.label)}</span>${c.kunden ? "<em>Service</em>" : c.custom ? "<em>eigenes Feld</em>" : ""}
       <button class="btn" type="button" data-colmv="${esc(k)}" data-dir="-1" ${i === 0 ? "disabled" : ""} aria-label="${esc(c.label)} nach vorne">↑</button>
       <button class="btn" type="button" data-colmv="${esc(k)}" data-dir="1" ${i === order.length - 1 ? "disabled" : ""} aria-label="${esc(c.label)} nach hinten">↓</button></div>`; }).join("");
-    return `<h3 class="section-title">Reihenfolge der Spalten</h3>
-      <p class="hint">Oben steht die Spalte ganz links. Du kannst Spalten auch direkt in der Tabelle verschieben: am Griff ⠿ im Spaltenkopf festhalten und nach links oder rechts ziehen.</p>
+    return `<h3 class="section-title">Reihenfolge der Spalten: ${esc(listById(S.list).label)}</h3>
+      <p class="hint">Jede Liste hat ihre eigene Reihenfolge. Hier siehst du die der ${esc(listById(S.list).label)}, für eine andere Liste wechsle oben zu ihr. Oben steht die Spalte ganz links. Du kannst Spalten auch direkt in der Tabelle verschieben: am Griff ⠿ im Spaltenkopf festhalten und nach links oder rechts ziehen.</p>
       <div class="colorder"><div class="corow fixed"><span>Name</span><em>bleibt immer vorne</em></div>${items}</div>
-      ${S.colOrder && S.colOrder.length ? `<div><button class="btn ghost" type="button" data-colreset="1">Standard-Reihenfolge wiederherstellen</button></div>` : ""}`;
+      ${curOrder().length ? `<div><button class="btn ghost" type="button" data-colreset="1">Standard-Reihenfolge wiederherstellen</button></div>` : ""}`;
   }
   function fieldsPanel() {
     const rows = S.fields.map((f) => `<div class="frow">
@@ -3092,14 +3099,14 @@ window.KONTAKT_CONFIG = {
     const t = e.target.closest("[data-act], [data-toggle], [data-del], [data-fdel], [data-ldel], [data-cal], [data-svcal], [data-dcolor], [data-colmv], [data-colreset], #impGo");
     if (!t) return;
     if (t.dataset.colmv) {
-      const order = orderCols(allColumns().map((c) => c.key)), i = order.indexOf(t.dataset.colmv), j = i + Number(t.dataset.dir);
+      const order = orderCols(listColumns().map((c) => c.key)), i = order.indexOf(t.dataset.colmv), j = i + Number(t.dataset.dir);
       if (i < 0 || j < 0 || j >= order.length) return;
       [order[i], order[j]] = [order[j], order[i]];
-      S.colOrder = order; saveSettings(); renderPanel(); renderTable();
+      S.colOrders = { ...(S.colOrders || {}), [S.list]: order }; saveSettings(); renderPanel(); renderTable();
       ov.querySelector(`[data-colmv="${CSS.escape(t.dataset.colmv)}"][data-dir="${t.dataset.dir}"]`)?.focus({ preventScroll: true });
       return;
     }
-    if (t.dataset.colreset) { S.colOrder = []; saveSettings(); renderPanel(); renderTable(); toast("Standard-Reihenfolge der Spalten wiederhergestellt."); return; }
+    if (t.dataset.colreset) { S.colOrders = { ...(S.colOrders || {}), [S.list]: [] }; saveSettings(); renderPanel(); renderTable(); toast("Standard-Reihenfolge der Spalten wiederhergestellt."); return; }
     if (t.dataset.ldel) {
       const key = "l:" + t.dataset.ldel, l = S.customLists.find((x) => x.id === t.dataset.ldel); if (!l) return;
       const members = inList(l.id), only = members.filter((c) => c.lists.length === 1).length;
