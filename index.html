@@ -180,7 +180,18 @@ td.w-name.has-c, tbody tr:hover td.w-name.has-c, tbody tr.sel td.w-name.has-c { 
 .cfilter .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--nc); }
 .cfilter .dot.all { background: conic-gradient(#e5484d, #f1c40f, #30a46c, #3e63dd, #8e4ec6, #e5484d); }
 .cfilter .dot.none { background: transparent; border: 1.5px dashed var(--muted); }
-.dcolors { display: flex; flex-wrap: wrap; gap: 8px; }
+.dcolors { display: flex; flex-wrap: wrap; gap: 6px; }
+.cchip { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 5px 11px 5px 8px; font-size: 13px; color: var(--fg); }
+.cchip .dot { width: 14px; height: 14px; border-radius: 50%; background: var(--nc); flex: none; }
+.cchip .dot.none { background: transparent; border: 1.5px dashed var(--muted); }
+.cchip[aria-pressed="true"] { border-color: var(--nc, var(--fg)); background: color-mix(in srgb, var(--nc, var(--muted)) 18%, var(--surface)); font-weight: 600; box-shadow: inset 0 0 0 1px var(--nc, var(--fg)); }
+.crename-link { display: block; width: 100%; margin-top: 6px; padding: 8px; border: 0; border-top: 1px solid var(--line); background: transparent; color: var(--accent); font-size: 13px; font-weight: 600; text-align: left; }
+.crename { display: flex; flex-direction: column; gap: 6px; }
+.crename label { display: flex; align-items: center; gap: 8px; }
+.crename .dot { width: 14px; height: 14px; border-radius: 50%; background: var(--nc); flex: none; }
+.crename input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font-size: 16px; background: var(--surface); color: var(--fg); }
+.chint { color: var(--muted); font-size: 12px; margin: 8px 0; }
+.cdone { width: 100%; }
 .dcolors .cswatch { width: 30px; height: 30px; }
 .w-name .cell { width: 180px; } .w-soz .cell { width: 130px; } .w-beruf .cell { width: 140px; } .w-info .cell { width: 300px; } .w-ns .cell { width: 200px; } .date-c .cell { width: 128px; } .w-pp .cell { width: 110px; } .w-c .cell { width: 140px; }
 
@@ -675,7 +686,7 @@ window.KONTAKT_CONFIG = {
   const S = {
     sb: null, session: null, me: null,
     view: "list", owner: null, ownerName: "", canEdit: false,
-    contacts: new Map(), fields: [], customLists: [], loadedContacts: false, channel: null,
+    contacts: new Map(), fields: [], customLists: [], colorNames: {}, loadedContacts: false, channel: null,
     list: "haupt", q: "", soz: "", color: "", sort: "name", dueOnly: false,
     selected: new Set(), panel: null, openId: null,
     team: [], users: [], access: [],
@@ -692,8 +703,15 @@ window.KONTAKT_CONFIG = {
   }
   function splitSettings(all) {
     const a = Array.isArray(all) ? all : [];
-    S.fields = a.filter((f) => f.kind !== "liste");
+    S.fields = a.filter((f) => f.kind !== "liste" && f.kind !== "farben");
     setCustomLists(a.filter((f) => f.kind === "liste"));
+    const cn = a.find((f) => f.kind === "farben");
+    S.colorNames = cn && cn.names && typeof cn.names === "object" ? { ...cn.names } : {};
+  }
+  // Eigene Namen für die Farben liegen als Eintrag {kind:"farben", names:{rot:"…"}} in field_settings.fields (keine DB-Änderung).
+  function allSettings() {
+    const names = Object.fromEntries(Object.entries(S.colorNames || {}).filter(([, v]) => v && v.trim()));
+    return [...S.fields, ...S.customLists, ...(Object.keys(names).length ? [{ id: "farben", kind: "farben", names }] : [])];
   }
   const uid8 = () => Math.random().toString(36).slice(2, 10);
   const newId = () => (crypto.randomUUID ? crypto.randomUUID() : "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) => (c ^ (Math.random() * 16) >> (c / 4)).toString(16)));
@@ -753,7 +771,7 @@ window.KONTAKT_CONFIG = {
   }
   let settingsChain = Promise.resolve();
   function saveSettings() {
-    const body = { owner: S.owner, fields: [...S.fields, ...S.customLists].map(({ _t, ...f }) => f), updated_at: new Date().toISOString() };
+    const body = { owner: S.owner, fields: allSettings().map(({ _t, ...f }) => f), updated_at: new Date().toISOString() };
     settingsChain = settingsChain.then(async () => {
       const { error } = await S.sb.from("field_settings").upsert(body);
       if (error) reportError(error);
@@ -791,7 +809,7 @@ window.KONTAKT_CONFIG = {
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "contacts" }, onRemote)
       .on("postgres_changes", { event: "*", schema: "public", table: "field_settings", filter: "owner=eq." + ownerId }, (pl) => {
         if ([...S.fields, ...S.customLists].some((f) => f._t) || !pl.new || !Array.isArray(pl.new.fields)) return;
-        if (JSON.stringify(pl.new.fields) === JSON.stringify([...S.fields, ...S.customLists])) return;
+        if (JSON.stringify(pl.new.fields) === JSON.stringify(allSettings())) return;
         splitSettings(pl.new.fields); renderAll();
       })
       .subscribe();
@@ -847,6 +865,7 @@ window.KONTAKT_CONFIG = {
     { id: "gruen", label: "Grün", hex: "#30a46c" }, { id: "tuerkis", label: "Türkis", hex: "#12a5a0" }, { id: "blau", label: "Blau", hex: "#3e63dd" },
     { id: "lila", label: "Lila", hex: "#8e4ec6" }, { id: "pink", label: "Pink", hex: "#d6409f" }, { id: "grau", label: "Grau", hex: "#8b8d98" },
   ];
+  function colLabel(x) { const n = (S.colorNames || {})[x.id]; return n && n.trim() ? n.trim() : x.label; }
   function nameColor(c) { const k = (c.custom || {})._color; return NAME_COLORS.find((x) => x.id === k) || null; }
   function colorRank(c) { const i = NAME_COLORS.findIndex((x) => x.id === (c.custom || {})._color); return i < 0 ? 99 : i; }
   function setNameColor(id, key, quiet) {
@@ -1043,7 +1062,7 @@ window.KONTAKT_CONFIG = {
     }
     const cf = S.color && S.color !== "none" ? NAME_COLORS.find((x) => x.id === S.color) : null;
     if (S.color && S.color !== "none" && !cf) S.color = "";
-    $("colorF").innerHTML = cf ? `<span class="dot" style="--nc: ${cf.hex}"></span><span>${esc(cf.label)}</span>` : S.color === "none" ? `<span class="dot none"></span><span>Ohne Farbe</span>` : `<span class="dot all"></span><span>Alle Farben</span>`;
+    $("colorF").innerHTML = cf ? `<span class="dot" style="--nc: ${cf.hex}"></span><span>${esc(colLabel(cf))}</span>` : S.color === "none" ? `<span class="dot none"></span><span>Ohne Farbe</span>` : `<span class="dot all"></span><span>Alle Farben</span>`;
     $("colorF").setAttribute("aria-pressed", String(!!S.color));
     const due = inList(S.list).filter(isDue).length;
     $("dueOnly").textContent = `Fällig: ${due}`;
@@ -1063,7 +1082,7 @@ window.KONTAKT_CONFIG = {
     box.innerHTML = `<strong>${ids.length} ausgewählt</strong>
       <select id="bulkAdd" aria-label="Zusätzlich in Liste aufnehmen"><option value="">Auch aufnehmen in …</option>${opts}</select>
       <select id="bulkMove" aria-label="In andere Liste verschieben"><option value="">Verschieben nach …</option>${opts}</select>
-      <select id="bulkColor" aria-label="Farbe setzen"><option value="">Farbe setzen …</option>${NAME_COLORS.map((x) => `<option value="${x.id}">${esc(x.label)}</option>`).join("")}<option value="-">Keine Farbe</option></select>
+      <select id="bulkColor" aria-label="Farbe setzen"><option value="">Farbe setzen …</option>${NAME_COLORS.map((x) => `<option value="${x.id}">${esc(colLabel(x))}</option>`).join("")}<option value="-">Keine Farbe</option></select>
       <button class="btn ghost" type="button" id="bulkClear">Auswahl aufheben</button>`;
   }
   function cellInput(c, id, key, field) {
@@ -1109,7 +1128,7 @@ window.KONTAKT_CONFIG = {
       return `<tr class="${S.selected.has(id) ? "sel" : ""}" data-row="${id}">
         <td class="rn sticky1">${i + 1}</td>
         <td class="check sticky2"><input type="checkbox" data-sel="${id}" ${S.selected.has(id) ? "checked" : ""} aria-label="Auswählen"></td>
-        ${(() => { const nc = nameColor(c); return `<td class="w-name sticky3 ${nc ? "has-c" : ""}" ${nc ? `style="--nc: ${nc.hex}"` : ""}><div class="name-wrap"><button type="button" class="ncolor ${nc ? "on" : ""}" data-ncolor="${id}" title="${nc ? "Farbe: " + nc.label : "Farbe wählen"}" aria-label="${nc ? "Farbe: " + nc.label + ", ändern" : "Farbe wählen"}" ${dis}></button>${cellInput(c, id, "name")}</div></td>`; })()}
+        ${(() => { const nc = nameColor(c); return `<td class="w-name sticky3 ${nc ? "has-c" : ""}" ${nc ? `style="--nc: ${nc.hex}"` : ""}><div class="name-wrap"><button type="button" class="ncolor ${nc ? "on" : ""}" data-ncolor="${id}" title="${nc ? "Farbe: " + esc(colLabel(nc)) : "Farbe wählen"}" aria-label="${nc ? "Farbe: " + esc(colLabel(nc)) + ", ändern" : "Farbe wählen"}" ${dis}></button>${cellInput(c, id, "name")}</div></td>`; })()}
         <td><div class="lists">${LISTS.map((l) => `<button type="button" class="lchip" style="--c: ${lc(l)}" data-toggle="${id}" data-list="${l.id}" aria-pressed="${c.lists.includes(l.id)}" title="${esc(l.label)}" ${dis}>${esc(l.short)}</button>`).join("")}</div></td>
         <td class="w-soz">${cellInput(c, id, "soziotop")}</td>
         <td class="w-beruf">${cellInput(c, id, "beruf")}</td>
@@ -1242,7 +1261,7 @@ window.KONTAKT_CONFIG = {
         <div class="cal-bar"><button class="btn" type="button" data-svcal="${id}" ${serviceNext(c) ? "" : "disabled"}>Nächsten Service in Kalender</button><span class="hint">Trag nach jedem Service das neue Datum ein, der nächste Termin rückt dann automatisch nach.</span></div>` : ""}
         ${custom.length ? `<h3 class="section-title">Eigene Felder</h3>` + custom.map((f) => dField(c, id, "c:" + f.id, f.label, f)).join("") : ""}
         <h3 class="section-title">Farbe</h3>
-        <div class="dcolors">${NAME_COLORS.map((x) => `<button type="button" class="cswatch" style="--nc: ${x.hex}" data-dcolor="${id}" data-c="${x.id}" aria-pressed="${(c.custom || {})._color === x.id}" title="${esc(x.label)}" aria-label="${esc(x.label)}" ${dis}></button>`).join("")}<button type="button" class="cswatch none" data-dcolor="${id}" data-c="" aria-pressed="${!nameColor(c)}" title="Keine Farbe" aria-label="Keine Farbe" ${dis}></button></div>
+        <div class="dcolors">${NAME_COLORS.map((x) => `<button type="button" class="cchip" style="--nc: ${x.hex}" data-dcolor="${id}" data-c="${x.id}" aria-pressed="${(c.custom || {})._color === x.id}" ${dis}><span class="dot"></span>${esc(colLabel(x))}</button>`).join("")}<button type="button" class="cchip" data-dcolor="${id}" data-c="" aria-pressed="${!nameColor(c)}" ${dis}><span class="dot none"></span>Keine Farbe</button></div>
         <h3 class="section-title">Listen</h3>
         ${S.canEdit ? `<p class="hint">Antippen, um den Kontakt in eine Liste aufzunehmen oder herauszunehmen. Ein Kontakt kann in mehreren Listen stehen.</p>` : ""}
         <div class="lists" style="padding:0;flex-wrap:wrap">${LISTS.map((l) => `<button type="button" class="lchip wide" style="--c: ${lc(l)}" data-toggle="${id}" data-list="${l.id}" aria-pressed="${c.lists.includes(l.id)}" ${dis}>${esc(l.label)}</button>`).join("")}</div>
@@ -2698,22 +2717,33 @@ window.KONTAKT_CONFIG = {
   cpop.className = "cpop"; cpop.hidden = true; cpop.setAttribute("role", "dialog");
   document.body.appendChild(cpop);
   let cpopAnchor = null;
-  function closeColorPop() { cpop.hidden = true; cpopAnchor = null; }
+  function closeColorPop() { if (cnameTimer) { clearTimeout(cnameTimer); cnameTimer = null; saveSettings(); renderAll(); } cpop.hidden = true; cpopAnchor = null; }
   function openColorPop(anchor, mode, id) {
     if (cpopAnchor === anchor && !cpop.hidden) { closeColorPop(); return; }
     cpopAnchor = anchor;
+    const renameLink = S.canEdit ? `<button type="button" class="crename-link" data-crename="1">Farben umbenennen …</button>` : "";
     if (mode === "set") {
       const c = S.contacts.get(id); if (!c) return;
       const cur = (c.custom || {})._color || "";
       cpop.setAttribute("aria-label", "Farbe wählen");
-      cpop.innerHTML = `<h4>Farbe für ${esc(c.name || "Kontakt")}</h4><div class="cgrid">${NAME_COLORS.map((x) => `<button type="button" class="cswatch" style="--nc: ${x.hex}" data-pick="${x.id}" data-pid="${id}" aria-pressed="${cur === x.id}" title="${esc(x.label)}" aria-label="${esc(x.label)}"></button>`).join("")}<button type="button" class="cswatch none" data-pick="" data-pid="${id}" aria-pressed="${!cur}" title="Keine Farbe" aria-label="Keine Farbe"></button></div>`;
+      cpop.innerHTML = `<h4>Farbe für ${esc(c.name || "Kontakt")}</h4><div class="clist">${NAME_COLORS.map((x) => `<button type="button" data-pick="${x.id}" data-pid="${id}" aria-pressed="${cur === x.id}"><span class="dot" style="--nc: ${x.hex}"></span><span>${esc(colLabel(x))}</span></button>`).join("")}<button type="button" data-pick="" data-pid="${id}" aria-pressed="${!cur}"><span class="dot none"></span><span>Keine Farbe</span></button></div>${renameLink}`;
     } else {
       const inL = inList(S.list), cnt = (k) => inL.filter((c) => k === "none" ? !nameColor(c) : (c.custom || {})._color === k).length;
       const row = (val, dot, label, n) => `<button type="button" data-fpick="${val}" aria-pressed="${S.color === val}" class="${n === 0 ? "zero" : ""}">${dot}<span>${esc(label)}</span>${n == null ? "" : `<span class="n">${n}</span>`}</button>`;
       cpop.setAttribute("aria-label", "Nach Farbe filtern");
-      cpop.innerHTML = `<h4>Nach Farbe filtern</h4><div class="clist">${row("", `<span class="dot all"></span>`, "Alle Farben", inL.length)}${NAME_COLORS.map((x) => row(x.id, `<span class="dot" style="--nc: ${x.hex}"></span>`, x.label, cnt(x.id))).join("")}${row("none", `<span class="dot none"></span>`, "Ohne Farbe", cnt("none"))}</div>`;
+      cpop.innerHTML = `<h4>Nach Farbe filtern</h4><div class="clist">${row("", `<span class="dot all"></span>`, "Alle Farben", inL.length)}${NAME_COLORS.map((x) => row(x.id, `<span class="dot" style="--nc: ${x.hex}"></span>`, colLabel(x), cnt(x.id))).join("")}${row("none", `<span class="dot none"></span>`, "Ohne Farbe", cnt("none"))}</div>${renameLink}`;
     }
+    showColorPop(anchor);
+  }
+  function renameColorsPop() {
+    cpop.setAttribute("aria-label", "Farben umbenennen");
+    cpop.innerHTML = `<h4>Farben umbenennen</h4><div class="crename">${NAME_COLORS.map((x) => `<label><span class="dot" style="--nc: ${x.hex}"></span><input type="text" data-cname="${x.id}" value="${esc((S.colorNames || {})[x.id] || "")}" placeholder="${esc(x.label)}" maxlength="30" aria-label="Name für ${esc(x.label)}"></label>`).join("")}</div><p class="chint">Leer lassen für den Standardnamen. Wird automatisch gespeichert.</p><button type="button" class="btn primary cdone" data-cdone="1">Fertig</button>`;
+    showColorPop(cpopAnchor);
+    cpop.querySelector("input")?.focus({ preventScroll: true });
+  }
+  function showColorPop(anchor) {
     cpop.hidden = false;
+    if (!anchor || !anchor.isConnected) anchor = $("colorF");
     const r = anchor.getBoundingClientRect(), w = cpop.offsetWidth, h = cpop.offsetHeight;
     let left = Math.min(Math.max(8, r.left - 6), window.innerWidth - w - 8);
     let top = r.bottom + 6;
@@ -2726,7 +2756,17 @@ window.KONTAKT_CONFIG = {
     const t = e.target.closest("button"); if (!t) return;
     if (t.dataset.pid) { const id = t.dataset.pid; closeColorPop(); setNameColor(id, t.dataset.pick); }
     else if (t.dataset.fpick != null) { S.color = t.dataset.fpick; closeColorPop(); renderAll(); }
+    else if (t.dataset.crename) renameColorsPop();
+    else if (t.dataset.cdone) { closeColorPop(); renderAll(); }
   });
+  let cnameTimer = null;
+  cpop.addEventListener("input", (e) => {
+    const k = e.target.dataset.cname; if (!k || !S.canEdit) return;
+    S.colorNames = { ...(S.colorNames || {}), [k]: e.target.value };
+    clearTimeout(cnameTimer);
+    cnameTimer = setTimeout(() => { saveSettings(); renderAll(); }, 600);
+  });
+  cpop.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.dataset.cname) { e.preventDefault(); const n = e.target.closest("label").nextElementSibling?.querySelector("input"); if (n) n.focus(); else { closeColorPop(); renderAll(); } } });
   document.addEventListener("pointerdown", (e) => { if (!cpop.hidden && !cpop.contains(e.target) && !(cpopAnchor && cpopAnchor.contains(e.target))) closeColorPop(); }, true);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !cpop.hidden) { const a = cpopAnchor; closeColorPop(); a?.focus?.(); } });
   window.addEventListener("resize", closeColorPop);
@@ -2803,7 +2843,7 @@ window.KONTAKT_CONFIG = {
       const col = NAME_COLORS.find((x) => x.id === target);
       for (const id of ids) setNameColor(id, col ? col.id : "", true);
       S.selected.clear(); renderAll();
-      toast(`${ids.length} ${ids.length === 1 ? "Kontakt" : "Kontakte"} ${col ? col.label + " markiert" : "ohne Farbe"}.`);
+      toast(`${ids.length} ${ids.length === 1 ? "Kontakt" : "Kontakte"} ${col ? "als „" + colLabel(col) + "“ markiert" : "ohne Farbe"}.`);
       return;
     }
     const move = e.target.id === "bulkMove";
