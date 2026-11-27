@@ -134,6 +134,13 @@ td.date-c .cell { font-family: var(--font-mono); font-size: 12px; }
 .date-wrap .cell { flex: 1; }
 .cal-btn { border: 1px solid var(--line); background: var(--surface); color: var(--accent); border-radius: 6px; font-size: 11px; font-weight: 600; padding: 3px 6px; margin-right: 4px; white-space: nowrap; }
 .cal-btn:hover { background: var(--accent-soft); }
+.cal-pop { position: fixed; z-index: 1000; width: 240px; max-width: calc(100vw - 16px); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,.18); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.cal-pop-h { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+.cal-pop-h span { color: var(--muted, #667); white-space: nowrap; }
+.cal-pop .field { margin: 0; }
+.cal-pop input, .cal-pop select { width: 100%; font-size: 16px; }
+.cal-pop-a { display: flex; gap: 6px; }
+.cal-pop-a .btn { flex: 1; }
 .cal-box { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; background: var(--surface-2); border-radius: var(--radius); padding: 10px 12px; }
 .cal-box .field { flex: 1 1 120px; }
 td.date-c.due, tbody tr:hover td.date-c.due { background: var(--warn-soft); }
@@ -1546,11 +1553,48 @@ window.KONTAKT_CONFIG = {
   // ---------- Kalender ----------
   function icsText(s) { return String(s || "").replace(/\\/g, "\\\\").replace(/\r?\n/g, "\\n").replace(/[,;]/g, (m) => "\\" + m); }
   function icsFold(line) { const out = []; while (line.length > 74) { out.push(line.slice(0, 74)); line = " " + line.slice(74); } out.push(line); return out.join("\r\n"); }
-  function addToCalendar(id) {
+  function calPopClose() { const p = $("calPop"); if (p) p.remove(); }
+  function calPopOpen(id, btn) {
     const c = S.contacts.get(id); if (!c) return;
     if (!c.nextDate) { toast("Trag zuerst bei „Fällig am“ ein Datum ein."); return; }
-    const time = ($("calTime") && S.openId === id && $("calTime").value) || "";
-    const dur = Number(($("calDur") && S.openId === id && $("calDur").value) || 60);
+    const was = $("calPop"); calPopClose(); if (was && was.dataset.id === id) return;
+    const last = (() => { try { return JSON.parse(localStorage.getItem("calPopLast") || "{}"); } catch { return {}; } })();
+    const pop = document.createElement("div");
+    pop.id = "calPop"; pop.className = "cal-pop"; pop.dataset.id = id;
+    pop.setAttribute("role", "dialog"); pop.setAttribute("aria-label", "Termin in den Kalender eintragen");
+    pop.innerHTML = `<div class="cal-pop-h"><strong>${esc(c.name || "Kontakt")}</strong><span>${esc(fmtDate(c.nextDate))}</span></div>
+      <label class="field"><span>Uhrzeit</span><input type="time" id="calPopTime" value="${esc(last.time || "10:00")}" step="300"></label>
+      <label class="field"><span>Dauer</span><select id="calPopDur">${[[15, "15 Minuten"], [30, "30 Minuten"], [45, "45 Minuten"], [60, "1 Stunde"], [90, "1,5 Stunden"], [120, "2 Stunden"], [180, "3 Stunden"]].map(([v, l]) => `<option value="${v}" ${Number(last.dur || 60) === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+      <div class="cal-pop-a"><button class="btn primary" type="button" data-cpgo="time">Eintragen</button><button class="btn ghost" type="button" data-cpgo="allday">Ganztägig</button></div>`;
+    document.body.appendChild(pop);
+    calPopOpen.btn = btn; calPopPlace();
+    pop.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-cpgo]"); if (!b) return;
+      const time = b.dataset.cpgo === "time" ? $("calPopTime").value : "";
+      const dur = Number($("calPopDur").value) || 60;
+      if (b.dataset.cpgo === "time" && !time) { toast("Wähl eine Uhrzeit oder tippe auf „Ganztägig“."); return; }
+      if (time) { try { localStorage.setItem("calPopLast", JSON.stringify({ time, dur })); } catch {} }
+      calPopClose(); addToCalendar(id, { time, dur });
+    });
+    pop.addEventListener("keydown", (e) => { if (e.key === "Escape") { calPopClose(); btn.focus(); } if (e.key === "Enter" && e.target.id === "calPopTime") pop.querySelector('[data-cpgo="time"]').click(); });
+    if (!matchMedia("(pointer: coarse)").matches) $("calPopTime").focus();
+  }
+  function calPopPlace() {
+    const pop = $("calPop"), btn = calPopOpen.btn; if (!pop) return;
+    if (!btn || !btn.isConnected) return calPopClose();
+    const r = btn.getBoundingClientRect(), w = pop.offsetWidth, h = pop.offsetHeight;
+    const left = Math.min(Math.max(8, r.left), window.innerWidth - w - 8);
+    let top = r.bottom + 6; if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 6);
+    pop.style.left = left + "px"; pop.style.top = top + "px";
+  }
+  document.addEventListener("pointerdown", (e) => { const p = $("calPop"); if (p && !p.contains(e.target) && !e.target.closest(".cal-btn")) calPopClose(); });
+  window.addEventListener("scroll", calPopPlace, true);
+  window.addEventListener("resize", calPopPlace);
+  function addToCalendar(id, opts) {
+    const c = S.contacts.get(id); if (!c) return;
+    if (!c.nextDate) { toast("Trag zuerst bei „Fällig am“ ein Datum ein."); return; }
+    const time = opts ? opts.time || "" : (($("calTime") && S.openId === id && $("calTime").value) || "");
+    const dur = opts ? Number(opts.dur) || 60 : Number(($("calDur") && S.openId === id && $("calDur").value) || 60);
     const d = c.nextDate.replace(/-/g, "");
     const pad = (n) => String(n).padStart(2, "0");
     const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
@@ -2988,7 +3032,7 @@ window.KONTAKT_CONFIG = {
   });
   $("tableBox").addEventListener("click", (e) => {
     const t = e.target.closest("button"); if (!t) return;
-    if (t.dataset.cal) addToCalendar(t.dataset.cal);
+    if (t.dataset.cal) calPopOpen(t.dataset.cal, t);
     else if (t.dataset.toggle) toggleList(t.dataset.toggle, t.dataset.list);
     else if (t.dataset.open) openPanel("contact", t.dataset.open);
     else if (t.dataset.act === "add") addContact();
