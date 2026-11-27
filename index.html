@@ -224,6 +224,21 @@ td.w-name.has-c, tbody tr:hover td.w-name.has-c, tbody tr.sel td.w-name.has-c { 
 .section-title { font-family: var(--font-display); font-size: 15px; margin: 6px 0 0; }
 .hint { color: var(--muted); font-size: 12.5px; margin: 0; }
 .meta { color: var(--muted); font-size: 12px; font-family: var(--font-mono); }
+/* Spalten verschieben: Griff im Tabellenkopf, Markierung der Zielposition */
+th.mcol { cursor: grab; user-select: none; -webkit-user-select: none; }
+th.mcol .colgrip { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 22px; margin: -4px 4px -4px -4px; border-radius: 4px; color: inherit; opacity: .45; touch-action: none; font-size: 13px; letter-spacing: 0; vertical-align: middle; }
+th.mcol:hover .colgrip { opacity: .9; background: rgba(255,255,255,.14); }
+@media (pointer: coarse) { th.mcol .colgrip { width: 26px; height: 28px; opacity: .7; } }
+th.mcol.col-drag { opacity: .55; }
+th.mcol.drop-before { box-shadow: inset 3px 0 0 var(--accent-2, #7fb2ff); }
+th.mcol.drop-after { box-shadow: inset -3px 0 0 var(--accent-2, #7fb2ff); }
+body.col-dragging, body.col-dragging * { cursor: grabbing !important; user-select: none; -webkit-user-select: none; }
+.colorder { display: flex; flex-direction: column; gap: 6px; }
+.colorder .corow { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.colorder .corow.fixed { background: var(--surface-2); color: var(--muted); }
+.colorder .corow span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.colorder .corow em { font-style: normal; font-size: 12px; color: var(--muted); }
+.colorder .corow button { min-width: 36px; min-height: 32px; padding: 4px 8px; }
 .frow { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: start; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); }
 .frow .scopes { grid-column: 1 / -1; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .frow .type { font-size: 12px; color: var(--muted); }
@@ -686,7 +701,7 @@ window.KONTAKT_CONFIG = {
   const S = {
     sb: null, session: null, me: null,
     view: "list", owner: null, ownerName: "", canEdit: false,
-    contacts: new Map(), fields: [], customLists: [], colorNames: {}, loadedContacts: false, channel: null,
+    contacts: new Map(), fields: [], customLists: [], colorNames: {}, colOrder: [], loadedContacts: false, channel: null,
     list: "haupt", q: "", soz: "", color: "", sort: "name", dueOnly: false,
     selected: new Set(), panel: null, openId: null,
     team: [], users: [], access: [],
@@ -703,7 +718,9 @@ window.KONTAKT_CONFIG = {
   }
   function splitSettings(all) {
     const a = Array.isArray(all) ? all : [];
-    S.fields = a.filter((f) => f.kind !== "liste" && f.kind !== "farben");
+    S.fields = a.filter((f) => f.kind !== "liste" && f.kind !== "farben" && f.kind !== "spalten");
+    const so = a.find((f) => f.kind === "spalten");
+    S.colOrder = so && Array.isArray(so.order) ? so.order.filter((k) => typeof k === "string") : [];
     setCustomLists(a.filter((f) => f.kind === "liste"));
     const cn = a.find((f) => f.kind === "farben");
     S.colorNames = cn && cn.names && typeof cn.names === "object" ? { ...cn.names } : {};
@@ -711,7 +728,8 @@ window.KONTAKT_CONFIG = {
   // Eigene Namen für die Farben liegen als Eintrag {kind:"farben", names:{rot:"…"}} in field_settings.fields (keine DB-Änderung).
   function allSettings() {
     const names = Object.fromEntries(Object.entries(S.colorNames || {}).filter(([, v]) => v && v.trim()));
-    return [...S.fields, ...S.customLists, ...(Object.keys(names).length ? [{ id: "farben", kind: "farben", names }] : [])];
+    return [...S.fields, ...S.customLists, ...(Object.keys(names).length ? [{ id: "farben", kind: "farben", names }] : []),
+      ...(S.colOrder && S.colOrder.length ? [{ id: "spalten", kind: "spalten", order: S.colOrder }] : [])];
   }
   const uid8 = () => Math.random().toString(36).slice(2, 10);
   const newId = () => (crypto.randomUUID ? crypto.randomUUID() : "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) => (c ^ (Math.random() * 16) >> (c / 4)).toString(16)));
@@ -791,7 +809,7 @@ window.KONTAKT_CONFIG = {
   async function openOwner(ownerId, name, canEdit) {
     if (S.channel) { S.sb.removeChannel(S.channel); S.channel = null; }
     S.owner = ownerId; S.ownerName = name; S.canEdit = canEdit;
-    S.contacts = new Map(); S.fields = []; setCustomLists([]); S.loadedContacts = false; S.selected.clear();
+    S.contacts = new Map(); S.fields = []; S.colOrder = []; setCustomLists([]); S.loadedContacts = false; S.selected.clear();
     S.view = "list"; S.list = "haupt"; S.q = ""; S.soz = ""; S.dueOnly = false; $("q").value = "";
     renderAll();
     const [{ data: fs }, rows] = await Promise.all([
@@ -1095,6 +1113,31 @@ window.KONTAKT_CONFIG = {
     const extra = key === "name" ? ' class="cell name" placeholder="Name"' : key === "soziotop" ? ' class="cell" list="dl-soz"' : key === "beruf" ? ' class="cell" list="dl-beruf"' : ' class="cell"';
     return `<input type="text"${extra} ${a} value="${esc(v ?? "")}" title="${esc(v ?? "")}">`;
   }
+  // Spalten-Reihenfolge: gespeichert als {kind:"spalten", order:[Schlüssel]} in field_settings.fields (keine DB-Änderung).
+  // Name bleibt immer vorne (fixiert). Spalten, die in der Reihenfolge noch fehlen (z. B. neue Felder), kommen an ihre Standardstelle.
+  const BASE_COLS = [["lists", "Listen"], ["soziotop", "Soziotop"], ["beruf", "Beruf"], ["info", "Informationen"], ["nextStep", "Next Step"], ["nextDate", "Fällig am"], ["c:_service", "Service-Termin"], ["c:_serviceNext", "Nächster Service"]];
+  function allColumns() { return [...BASE_COLS.map(([k, l]) => ({ key: k, label: l, kunden: k.startsWith("c:_") })), ...S.fields.map((f) => ({ key: "c:" + f.id, label: f.label, custom: true }))]; }
+  function orderCols(keys) {
+    const set = new Set(keys);
+    const res = (S.colOrder || []).filter((k, i, a) => set.has(k) && a.indexOf(k) === i);
+    keys.forEach((k, i) => {
+      if (res.includes(k)) return;
+      let pos = 0;
+      for (let j = i - 1; j >= 0; j--) { const at = res.indexOf(keys[j]); if (at >= 0) { pos = at + 1; break; } }
+      res.splice(pos, 0, k);
+    });
+    return res;
+  }
+  // Verschiebt Spalte "from" vor bzw. hinter Spalte "to" und speichert die Reihenfolge über alle Spalten (auch die anderer Listen).
+  function moveCol(from, to, after) {
+    if (from === to) return;
+    const order = orderCols(allColumns().map((c) => c.key)).filter((k) => k !== from);
+    let at = order.indexOf(to); if (at < 0) return;
+    order.splice(after ? at + 1 : at, 0, from);
+    S.colOrder = order;
+    saveSettings(); renderTable();
+    if (S.panel === "fields") renderPanel();
+  }
   function renderTable() {
     const box = $("tableBox");
     if (!S.loadedContacts) { box.innerHTML = `<div class="empty"><h2>Kontakte werden geladen …</h2><p>Hier erscheint gleich die Liste mit Name, Soziotop, Beruf, Informationen und Next Step.</p></div>`; return; }
@@ -1117,10 +1160,24 @@ window.KONTAKT_CONFIG = {
       return;
     }
     const allSel = rows.every((c) => S.selected.has(c._id));
+    const dis0 = S.canEdit ? "" : "disabled";
+    const colDefs = {
+      lists: { label: "Listen", td: (c, id) => `<td><div class="lists">${LISTS.map((l) => `<button type="button" class="lchip" style="--c: ${lc(l)}" data-toggle="${id}" data-list="${l.id}" aria-pressed="${c.lists.includes(l.id)}" title="${esc(l.label)}" ${dis0}>${esc(l.short)}</button>`).join("")}</div></td>` },
+      soziotop: { label: "Soziotop", td: (c, id) => `<td class="w-soz">${cellInput(c, id, "soziotop")}</td>` },
+      beruf: { label: "Beruf", td: (c, id) => `<td class="w-beruf">${cellInput(c, id, "beruf")}</td>` },
+      info: { label: "Informationen", td: (c, id) => `<td class="w-info">${cellInput(c, id, "info")}</td>` },
+      nextStep: { label: "Next Step", td: (c, id) => `<td class="w-ns">${cellInput(c, id, "nextStep")}</td>` },
+      nextDate: { label: "Fällig am", td: (c, id) => `<td class="date-c ${isDue(c) ? "due" : ""}"><div class="date-wrap"><input class="cell" type="date" data-id="${id}" data-f="nextDate" value="${esc(c.nextDate || "")}" aria-label="Fällig am" ${dis0}><button type="button" class="cal-btn" data-cal="${id}" title="In den Kalender eintragen" ${c.nextDate ? "" : "hidden"}>Kalender</button></div></td>` },
+    };
+    if (S.list === "kunden") {
+      colDefs["c:_service"] = { label: "Service-Termin", cls: "custom", td: (c, id) => `<td class="w-c date-c">${cellInput(c, id, "c:_service", SERVICE_FIELD)}</td>` };
+      colDefs["c:_serviceNext"] = { label: "Nächster Service", cls: "custom", title: "Wird automatisch ein halbes Jahr nach dem Service-Termin eingetragen", td: (c, id) => `<td class="w-c date-c svc ${serviceState(c)}">${cellInput(c, id, "c:_serviceNext", SERVICE_FIELD)}</td>` };
+    }
+    for (const f of custom) colDefs["c:" + f.id] = { label: f.label, cls: "custom", title: "Eigenes Feld", td: (c, id) => `<td class="w-c ${f.type === "janein" ? "bool" : ""} ${f.type === "datum" ? "date-c" : ""}">${cellInput(c, id, "c:" + f.id, f)}</td>` };
+    const colKeys = orderCols(Object.keys(colDefs));
     const head = `<tr><th class="rn sticky1">#</th><th class="check sticky2"><input type="checkbox" id="selAll" ${allSel ? "checked" : ""} aria-label="Alle auswählen"></th>
-      <th class="sticky3">Name</th><th>Listen</th><th>Soziotop</th><th>Beruf</th><th>Informationen</th><th>Next Step</th><th>Fällig am</th>
-      ${S.list === "kunden" ? `<th class="custom">Service-Termin</th><th class="custom" title="Wird automatisch ein halbes Jahr nach dem Service-Termin eingetragen">Nächster Service</th>` : ""}
-      ${custom.map((f) => `<th class="custom" title="Eigenes Feld">${esc(f.label)}</th>`).join("")}
+      <th class="sticky3">Name</th>
+      ${colKeys.map((k) => { const d = colDefs[k]; return `<th class="mcol ${d.cls || ""}" data-col="${esc(k)}" title="${esc(d.title || "")}${S.canEdit ? (d.title ? " · " : "") + "Zum Verschieben am Griff ziehen" : ""}">${S.canEdit ? `<span class="colgrip" aria-hidden="true">⠿</span>` : ""}${esc(d.label)}</th>`; }).join("")}
       <th></th></tr>`;
     const dis = S.canEdit ? "" : "disabled";
     const rowHtml = (c, i) => {
@@ -1129,14 +1186,7 @@ window.KONTAKT_CONFIG = {
         <td class="rn sticky1">${i + 1}</td>
         <td class="check sticky2"><input type="checkbox" data-sel="${id}" ${S.selected.has(id) ? "checked" : ""} aria-label="Auswählen"></td>
         ${(() => { const nc = nameColor(c); return `<td class="w-name sticky3 ${nc ? "has-c" : ""}" ${nc ? `style="--nc: ${nc.hex}"` : ""}><div class="name-wrap"><button type="button" class="ncolor ${nc ? "on" : ""}" data-ncolor="${id}" title="${nc ? "Farbe: " + esc(colLabel(nc)) : "Farbe wählen"}" aria-label="${nc ? "Farbe: " + esc(colLabel(nc)) + ", ändern" : "Farbe wählen"}" ${dis}></button>${cellInput(c, id, "name")}</div></td>`; })()}
-        <td><div class="lists">${LISTS.map((l) => `<button type="button" class="lchip" style="--c: ${lc(l)}" data-toggle="${id}" data-list="${l.id}" aria-pressed="${c.lists.includes(l.id)}" title="${esc(l.label)}" ${dis}>${esc(l.short)}</button>`).join("")}</div></td>
-        <td class="w-soz">${cellInput(c, id, "soziotop")}</td>
-        <td class="w-beruf">${cellInput(c, id, "beruf")}</td>
-        <td class="w-info">${cellInput(c, id, "info")}</td>
-        <td class="w-ns">${cellInput(c, id, "nextStep")}</td>
-        <td class="date-c ${isDue(c) ? "due" : ""}"><div class="date-wrap"><input class="cell" type="date" data-id="${id}" data-f="nextDate" value="${esc(c.nextDate || "")}" aria-label="Fällig am" ${dis}><button type="button" class="cal-btn" data-cal="${id}" title="In den Kalender eintragen" ${c.nextDate ? "" : "hidden"}>Kalender</button></div></td>
-        ${S.list === "kunden" ? `<td class="w-c date-c">${cellInput(c, id, "c:_service", SERVICE_FIELD)}</td><td class="w-c date-c svc ${serviceState(c)}">${cellInput(c, id, "c:_serviceNext", SERVICE_FIELD)}</td>` : ""}
-        ${custom.map((f) => `<td class="w-c ${f.type === "janein" ? "bool" : ""} ${f.type === "datum" ? "date-c" : ""}">${cellInput(c, id, "c:" + f.id, f)}</td>`).join("")}
+        ${colKeys.map((k) => colDefs[k].td(c, id)).join("")}
         <td class="act"><button type="button" class="open-btn" data-open="${id}" title="Alle Angaben ansehen">Öffnen</button></td>
       </tr>`;
     };
@@ -1269,6 +1319,17 @@ window.KONTAKT_CONFIG = {
       </div>
       <div class="drawer-foot">${S.canEdit ? `<button class="btn danger" type="button" data-del="${id}">Kontakt löschen</button>` : ""}<span class="spacer"></span><button class="btn primary" type="button" data-act="close">Fertig</button></div>`;
   }
+  function colOrderSection() {
+    const cols = allColumns(), byKey = Object.fromEntries(cols.map((c) => [c.key, c]));
+    const order = orderCols(cols.map((c) => c.key));
+    const items = order.map((k, i) => { const c = byKey[k]; return `<div class="corow"><span>${esc(c.label)}</span>${c.kunden ? "<em>nur Kundenliste</em>" : c.custom ? "<em>eigenes Feld</em>" : ""}
+      <button class="btn" type="button" data-colmv="${esc(k)}" data-dir="-1" ${i === 0 ? "disabled" : ""} aria-label="${esc(c.label)} nach vorne">↑</button>
+      <button class="btn" type="button" data-colmv="${esc(k)}" data-dir="1" ${i === order.length - 1 ? "disabled" : ""} aria-label="${esc(c.label)} nach hinten">↓</button></div>`; }).join("");
+    return `<h3 class="section-title">Reihenfolge der Spalten</h3>
+      <p class="hint">Oben steht die Spalte ganz links. Du kannst Spalten auch direkt in der Tabelle verschieben: am Griff ⠿ im Spaltenkopf festhalten und nach links oder rechts ziehen.</p>
+      <div class="colorder"><div class="corow fixed"><span>Name</span><em>bleibt immer vorne</em></div>${items}</div>
+      ${S.colOrder && S.colOrder.length ? `<div><button class="btn ghost" type="button" data-colreset="1">Standard-Reihenfolge wiederherstellen</button></div>` : ""}`;
+  }
   function fieldsPanel() {
     const rows = S.fields.map((f) => `<div class="frow">
         <input type="text" data-frename="${f.id}" value="${esc(f.label)}" aria-label="Feldname">
@@ -1291,6 +1352,7 @@ window.KONTAKT_CONFIG = {
         </form>
         <h3 class="section-title">Eigene Felder (${S.fields.length})</h3>
         ${rows || `<p class="hint">Noch keine eigenen Felder.</p>`}
+        ${colOrderSection()}
       </div>`;
   }
   function listsPanel() {
@@ -2812,6 +2874,61 @@ window.KONTAKT_CONFIG = {
       if (row) { if (row.type === "checkbox") row.checked = !!v; else row.value = v; }
     }
   }
+  // Spalten per Ziehen verschieben (Maus, Trackpad und Finger/Stift). Auf Touch nur am Griff, damit Wischen weiter scrollt.
+  (() => {
+    const box = $("tableBox");
+    let drag = null;
+    const clear = () => box.querySelectorAll("th.drop-before, th.drop-after").forEach((th) => th.classList.remove("drop-before", "drop-after"));
+    const targetAt = (x, y) => {
+      const ths = [...box.querySelectorAll("thead th.mcol")];
+      if (!ths.length) return null;
+      const hit = ths.find((th) => { const r = th.getBoundingClientRect(); return x >= r.left && x < r.right; });
+      if (hit) { const r = hit.getBoundingClientRect(); return { th: hit, after: x > r.left + r.width / 2 }; }
+      const firstR = ths[0].getBoundingClientRect();
+      return x < firstR.left ? { th: ths[0], after: false } : { th: ths[ths.length - 1], after: true };
+    };
+    const end = (commit) => {
+      if (!drag) return;
+      const d = drag; drag = null;
+      cancelAnimationFrame(d.raf);
+      document.body.classList.remove("col-dragging");
+      d.src.classList.remove("col-drag"); clear();
+      try { d.src.releasePointerCapture(d.pid); } catch (e) {}
+      if (commit && d.started && d.target) moveCol(d.key, d.target.th.dataset.col, d.target.after);
+    };
+    box.addEventListener("pointerdown", (e) => {
+      if (!S.canEdit || e.button > 0) return;
+      const th = e.target.closest("thead th.mcol"); if (!th) return;
+      const onGrip = !!e.target.closest(".colgrip");
+      if (e.pointerType !== "mouse" && !onGrip) return;
+      drag = { key: th.dataset.col, src: th, pid: e.pointerId, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, started: false, target: null, raf: 0 };
+      try { th.setPointerCapture(e.pointerId); } catch (err) {}
+      if (onGrip) e.preventDefault();
+    });
+    const tick = () => {
+      if (!drag || !drag.started) return;
+      const r = box.getBoundingClientRect(), edge = 48;
+      if (drag.x < r.left + edge + 200) box.scrollLeft -= Math.max(0, (r.left + edge + 200 - drag.x) / 6);
+      else if (drag.x > r.right - edge) box.scrollLeft += (drag.x - (r.right - edge)) / 4;
+      drag.target = targetAt(drag.x, drag.y); clear();
+      if (drag.target && drag.target.th !== drag.src) drag.target.th.classList.add(drag.target.after ? "drop-after" : "drop-before");
+      drag.raf = requestAnimationFrame(tick);
+    };
+    box.addEventListener("pointermove", (e) => {
+      if (!drag || e.pointerId !== drag.pid) return;
+      drag.x = e.clientX; drag.y = e.clientY;
+      if (!drag.started) {
+        if (Math.abs(e.clientX - drag.x0) < 6 && Math.abs(e.clientY - drag.y0) < 6) return;
+        drag.started = true; document.body.classList.add("col-dragging"); drag.src.classList.add("col-drag");
+        if (!cpop.hidden) closeColorPop();
+        drag.raf = requestAnimationFrame(tick);
+      }
+      e.preventDefault();
+    });
+    box.addEventListener("pointerup", (e) => { if (drag && e.pointerId === drag.pid) end(true); });
+    box.addEventListener("pointercancel", () => end(false));
+    window.addEventListener("keydown", (e) => { if (e.key === "Escape" && drag) end(false); });
+  })();
   $("tableBox").addEventListener("input", onCellEdit);
   $("tableBox").addEventListener("change", (e) => {
     if (e.target.dataset.sel) {
@@ -2961,8 +3078,17 @@ window.KONTAKT_CONFIG = {
   });
   let armed = null;
   ov.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-act], [data-toggle], [data-del], [data-fdel], [data-ldel], [data-cal], [data-svcal], [data-dcolor], #impGo");
+    const t = e.target.closest("[data-act], [data-toggle], [data-del], [data-fdel], [data-ldel], [data-cal], [data-svcal], [data-dcolor], [data-colmv], [data-colreset], #impGo");
     if (!t) return;
+    if (t.dataset.colmv) {
+      const order = orderCols(allColumns().map((c) => c.key)), i = order.indexOf(t.dataset.colmv), j = i + Number(t.dataset.dir);
+      if (i < 0 || j < 0 || j >= order.length) return;
+      [order[i], order[j]] = [order[j], order[i]];
+      S.colOrder = order; saveSettings(); renderPanel(); renderTable();
+      ov.querySelector(`[data-colmv="${CSS.escape(t.dataset.colmv)}"][data-dir="${t.dataset.dir}"]`)?.focus({ preventScroll: true });
+      return;
+    }
+    if (t.dataset.colreset) { S.colOrder = []; saveSettings(); renderPanel(); renderTable(); toast("Standard-Reihenfolge der Spalten wiederhergestellt."); return; }
     if (t.dataset.ldel) {
       const key = "l:" + t.dataset.ldel, l = S.customLists.find((x) => x.id === t.dataset.ldel); if (!l) return;
       const members = inList(l.id), only = members.filter((c) => c.lists.length === 1).length;
