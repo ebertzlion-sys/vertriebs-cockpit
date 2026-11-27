@@ -150,6 +150,38 @@ td.bool { text-align: center; padding: 0 8px; }
 td.act { padding: 0 6px; }
 .open-btn { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 3px 8px; font-size: 12px; }
 .open-btn:hover { background: var(--surface-2); }
+.name-wrap { display: flex; align-items: center; }
+.name-wrap .cell { flex: 1; }
+.ncolor { flex: none; width: 18px; height: 18px; border-radius: 50%; border: 1.5px dashed color-mix(in srgb, var(--muted) 70%, transparent); background: transparent; margin-left: 7px; padding: 0; cursor: pointer; }
+.ncolor:hover { border-color: var(--accent); }
+.ncolor.on { border: 2px solid var(--surface); background: var(--nc); box-shadow: 0 0 0 1px var(--nc); }
+.ncolor:disabled { cursor: default; }
+.ncolor:disabled:not(.on) { visibility: hidden; }
+td.w-name.has-c, tbody tr:hover td.w-name.has-c, tbody tr.sel td.w-name.has-c { background: color-mix(in srgb, var(--nc) 22%, var(--surface)); box-shadow: inset 4px 0 0 var(--nc), 1px 0 0 var(--line), 4px 0 6px -4px rgba(0,0,0,.18); }
+.cpop { position: fixed; z-index: 30; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); padding: 10px; width: 236px; }
+.cpop[hidden] { display: none; }
+.cpop h4 { margin: 0 0 8px; font-size: 12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+.cgrid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.cswatch { width: 34px; height: 34px; border-radius: 50%; border: 2px solid var(--surface); background: var(--nc); box-shadow: 0 0 0 1px color-mix(in srgb, var(--nc) 60%, var(--line)); padding: 0; cursor: pointer; justify-self: center; }
+.cswatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--fg); }
+.cswatch.none { background: var(--surface); border: 1.5px dashed var(--muted); box-shadow: none; position: relative; }
+.cswatch.none::after { content: ""; position: absolute; left: 50%; top: 4px; bottom: 4px; width: 1.5px; background: var(--muted); transform: rotate(45deg); }
+.cswatch.none[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--fg); }
+.clist { display: flex; flex-direction: column; gap: 2px; }
+.clist button { display: flex; align-items: center; gap: 10px; border: 0; background: transparent; border-radius: 8px; padding: 7px 8px; text-align: left; font-size: 14px; color: var(--fg); width: 100%; }
+.clist button:hover, .clist button[aria-pressed="true"] { background: var(--surface-2); }
+.clist button[aria-pressed="true"] { font-weight: 600; }
+.clist .dot { width: 14px; height: 14px; border-radius: 50%; background: var(--nc); flex: none; }
+.clist .dot.none { background: transparent; border: 1.5px dashed var(--muted); }
+.clist .dot.all { background: conic-gradient(#e5484d, #f1c40f, #30a46c, #3e63dd, #8e4ec6, #e5484d); }
+.clist .n { margin-left: auto; color: var(--muted); font-family: var(--font-mono); font-size: 12px; }
+.clist button.zero { color: var(--muted); }
+.cfilter { display: inline-flex; align-items: center; gap: 7px; }
+.cfilter .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--nc); }
+.cfilter .dot.all { background: conic-gradient(#e5484d, #f1c40f, #30a46c, #3e63dd, #8e4ec6, #e5484d); }
+.cfilter .dot.none { background: transparent; border: 1.5px dashed var(--muted); }
+.dcolors { display: flex; flex-wrap: wrap; gap: 8px; }
+.dcolors .cswatch { width: 30px; height: 30px; }
 .w-name .cell { width: 180px; } .w-soz .cell { width: 130px; } .w-beruf .cell { width: 140px; } .w-info .cell { width: 300px; } .w-ns .cell { width: 200px; } .date-c .cell { width: 128px; } .w-pp .cell { width: 110px; } .w-c .cell { width: 140px; }
 
 .empty { padding: 48px 20px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 12px; }
@@ -589,7 +621,9 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
       <option value="next">Nach Next-Step-Datum</option>
       <option value="updated">Zuletzt bearbeitet</option>
       <option value="created">Zuletzt angelegt</option>
+      <option value="color">Nach Farbe</option>
     </select>
+    <button class="chip-toggle cfilter" id="colorF" type="button" aria-haspopup="true" aria-pressed="false" title="Nach Farbe filtern"><span class="dot all"></span><span>Alle Farben</span></button>
     <button class="chip-toggle" id="dueOnly" type="button" aria-pressed="false">Fällig: 0</button>
     <span class="spacer"></span>
     <button class="btn ghost" id="btnExport" type="button">Als CSV speichern</button>
@@ -642,7 +676,7 @@ window.KONTAKT_CONFIG = {
     sb: null, session: null, me: null,
     view: "list", owner: null, ownerName: "", canEdit: false,
     contacts: new Map(), fields: [], customLists: [], loadedContacts: false, channel: null,
-    list: "haupt", q: "", soz: "", sort: "name", dueOnly: false,
+    list: "haupt", q: "", soz: "", color: "", sort: "name", dueOnly: false,
     selected: new Set(), panel: null, openId: null,
     team: [], users: [], access: [],
     authMode: "login", authMsg: "", authErr: false,
@@ -807,17 +841,35 @@ window.KONTAKT_CONFIG = {
   function setVal(c, key, v) { if (key.startsWith("c:")) c.custom = { ...(c.custom || {}), [key.slice(2)]: v }; else c[key] = v; }
   function inList(listId) { return [...S.contacts.values()].filter((c) => (c.lists || []).includes(listId)); }
   const COLL = new Intl.Collator("de", { sensitivity: "base" });
+  // Farbe pro Kontakt: färbt nur die Namens-Zelle. Liegt in custom._color, damit keine Datenbankänderung nötig ist.
+  const NAME_COLORS = [
+    { id: "rot", label: "Rot", hex: "#e5484d" }, { id: "orange", label: "Orange", hex: "#f76b15" }, { id: "gelb", label: "Gelb", hex: "#f1c40f" },
+    { id: "gruen", label: "Grün", hex: "#30a46c" }, { id: "tuerkis", label: "Türkis", hex: "#12a5a0" }, { id: "blau", label: "Blau", hex: "#3e63dd" },
+    { id: "lila", label: "Lila", hex: "#8e4ec6" }, { id: "pink", label: "Pink", hex: "#d6409f" }, { id: "grau", label: "Grau", hex: "#8b8d98" },
+  ];
+  function nameColor(c) { const k = (c.custom || {})._color; return NAME_COLORS.find((x) => x.id === k) || null; }
+  function colorRank(c) { const i = NAME_COLORS.findIndex((x) => x.id === (c.custom || {})._color); return i < 0 ? 99 : i; }
+  function setNameColor(id, key, quiet) {
+    const c = S.contacts.get(id); if (!c || !S.canEdit) return;
+    const cu = { ...(c.custom || {}) };
+    if (key) cu._color = key; else delete cu._color;
+    c.custom = cu;
+    saveContact(id, 0);
+    if (!quiet) renderAll();
+  }
   function visibleRows() {
     const q = S.q.trim().toLowerCase();
     let rows = inList(S.list);
     if (S.soz) rows = rows.filter((c) => (c.soziotop || "") === S.soz);
     if (S.dueOnly) rows = rows.filter(isDue);
-    if (q) rows = rows.filter((c) => [c.name, c.soziotop, c.beruf, c.info, c.nextStep, ...Object.values(c.custom || {})].join(" ").toLowerCase().includes(q));
+    if (S.color) rows = rows.filter((c) => S.color === "none" ? !nameColor(c) : (c.custom || {})._color === S.color);
+    if (q) rows = rows.filter((c) => [c.name, c.soziotop, c.beruf, c.info, c.nextStep, ...Object.entries(c.custom || {}).filter(([k]) => k !== "_color").map(([, v]) => v)].join(" ").toLowerCase().includes(q));
     const by = {
       name: (a, b) => COLL.compare(a.name || "", b.name || ""),
       next: (a, b) => { const x = a.nextDate || "9999", y = b.nextDate || "9999"; return x < y ? -1 : x > y ? 1 : by.name(a, b); },
       updated: (a, b) => (b.updated || 0) - (a.updated || 0),
       created: (a, b) => (b.created || 0) - (a.created || 0),
+      color: (a, b) => colorRank(a) - colorRank(b) || by.name(a, b),
     };
     return rows.sort(by[S.sort] || by.name);
   }
@@ -989,6 +1041,10 @@ window.KONTAKT_CONFIG = {
       $("dl-soz").innerHTML = socs.map((s) => `<option value="${esc(s)}"></option>`).join("");
       $("dl-beruf").innerHTML = berufe.map((s) => `<option value="${esc(s)}"></option>`).join("");
     }
+    const cf = S.color && S.color !== "none" ? NAME_COLORS.find((x) => x.id === S.color) : null;
+    if (S.color && S.color !== "none" && !cf) S.color = "";
+    $("colorF").innerHTML = cf ? `<span class="dot" style="--nc: ${cf.hex}"></span><span>${esc(cf.label)}</span>` : S.color === "none" ? `<span class="dot none"></span><span>Ohne Farbe</span>` : `<span class="dot all"></span><span>Alle Farben</span>`;
+    $("colorF").setAttribute("aria-pressed", String(!!S.color));
     const due = inList(S.list).filter(isDue).length;
     $("dueOnly").textContent = `Fällig: ${due}`;
     $("dueOnly").setAttribute("aria-pressed", String(S.dueOnly));
@@ -1007,6 +1063,7 @@ window.KONTAKT_CONFIG = {
     box.innerHTML = `<strong>${ids.length} ausgewählt</strong>
       <select id="bulkAdd" aria-label="Zusätzlich in Liste aufnehmen"><option value="">Auch aufnehmen in …</option>${opts}</select>
       <select id="bulkMove" aria-label="In andere Liste verschieben"><option value="">Verschieben nach …</option>${opts}</select>
+      <select id="bulkColor" aria-label="Farbe setzen"><option value="">Farbe setzen …</option>${NAME_COLORS.map((x) => `<option value="${x.id}">${esc(x.label)}</option>`).join("")}<option value="-">Keine Farbe</option></select>
       <button class="btn ghost" type="button" id="bulkClear">Auswahl aufheben</button>`;
   }
   function cellInput(c, id, key, field) {
@@ -1025,7 +1082,7 @@ window.KONTAKT_CONFIG = {
     const rows = visibleRows();
     const custom = fieldsFor(S.list);
     // Gleiche Ansicht neu zeichnen (z. B. nach Klick auf einen Listen-Knopf): Scrollposition und Fokus behalten, statt nach oben zu springen.
-    const viewKey = [S.owner, S.list, S.sort, S.q, S.soz, S.dueOnly].join("|");
+    const viewKey = [S.owner, S.list, S.sort, S.q, S.soz, S.color, S.dueOnly].join("|");
     const same = S.tableKey === viewKey;
     S.tableKey = viewKey;
     const keepPos = same ? { top: box.scrollTop, left: box.scrollLeft, y: window.scrollY, n: box.querySelectorAll("tbody tr").length } : null;
@@ -1052,7 +1109,7 @@ window.KONTAKT_CONFIG = {
       return `<tr class="${S.selected.has(id) ? "sel" : ""}" data-row="${id}">
         <td class="rn sticky1">${i + 1}</td>
         <td class="check sticky2"><input type="checkbox" data-sel="${id}" ${S.selected.has(id) ? "checked" : ""} aria-label="Auswählen"></td>
-        <td class="w-name sticky3">${cellInput(c, id, "name")}</td>
+        ${(() => { const nc = nameColor(c); return `<td class="w-name sticky3 ${nc ? "has-c" : ""}" ${nc ? `style="--nc: ${nc.hex}"` : ""}><div class="name-wrap"><button type="button" class="ncolor ${nc ? "on" : ""}" data-ncolor="${id}" title="${nc ? "Farbe: " + nc.label : "Farbe wählen"}" aria-label="${nc ? "Farbe: " + nc.label + ", ändern" : "Farbe wählen"}" ${dis}></button>${cellInput(c, id, "name")}</div></td>`; })()}
         <td><div class="lists">${LISTS.map((l) => `<button type="button" class="lchip" style="--c: ${lc(l)}" data-toggle="${id}" data-list="${l.id}" aria-pressed="${c.lists.includes(l.id)}" title="${esc(l.label)}" ${dis}>${esc(l.short)}</button>`).join("")}</div></td>
         <td class="w-soz">${cellInput(c, id, "soziotop")}</td>
         <td class="w-beruf">${cellInput(c, id, "beruf")}</td>
@@ -1184,6 +1241,8 @@ window.KONTAKT_CONFIG = {
         <div class="grid2">${dField(c, id, "c:_service", "Service-Termin", SERVICE_FIELD)}${dField(c, id, "c:_serviceNext", "Nächster Service (automatisch +6 Monate)", SERVICE_FIELD)}</div>
         <div class="cal-bar"><button class="btn" type="button" data-svcal="${id}" ${serviceNext(c) ? "" : "disabled"}>Nächsten Service in Kalender</button><span class="hint">Trag nach jedem Service das neue Datum ein, der nächste Termin rückt dann automatisch nach.</span></div>` : ""}
         ${custom.length ? `<h3 class="section-title">Eigene Felder</h3>` + custom.map((f) => dField(c, id, "c:" + f.id, f.label, f)).join("") : ""}
+        <h3 class="section-title">Farbe</h3>
+        <div class="dcolors">${NAME_COLORS.map((x) => `<button type="button" class="cswatch" style="--nc: ${x.hex}" data-dcolor="${id}" data-c="${x.id}" aria-pressed="${(c.custom || {})._color === x.id}" title="${esc(x.label)}" aria-label="${esc(x.label)}" ${dis}></button>`).join("")}<button type="button" class="cswatch none" data-dcolor="${id}" data-c="" aria-pressed="${!nameColor(c)}" title="Keine Farbe" aria-label="Keine Farbe" ${dis}></button></div>
         <h3 class="section-title">Listen</h3>
         ${S.canEdit ? `<p class="hint">Antippen, um den Kontakt in eine Liste aufzunehmen oder herauszunehmen. Ein Kontakt kann in mehreren Listen stehen.</p>` : ""}
         <div class="lists" style="padding:0;flex-wrap:wrap">${LISTS.map((l) => `<button type="button" class="lchip wide" style="--c: ${lc(l)}" data-toggle="${id}" data-list="${l.id}" aria-pressed="${c.lists.includes(l.id)}" ${dis}>${esc(l.label)}</button>`).join("")}</div>
@@ -2633,6 +2692,45 @@ window.KONTAKT_CONFIG = {
   $("soz").addEventListener("change", (e) => { S.soz = e.target.value; renderAll(); });
   $("sort").addEventListener("change", (e) => { S.sort = e.target.value; try { localStorage.setItem("kd-sort", S.sort); } catch (err) {} renderAll(); });
   $("dueOnly").addEventListener("click", () => { S.dueOnly = !S.dueOnly; renderAll(); });
+
+  // ---------- Farben: Auswahl-Fenster für Namens-Zelle und Filter ----------
+  const cpop = document.createElement("div");
+  cpop.className = "cpop"; cpop.hidden = true; cpop.setAttribute("role", "dialog");
+  document.body.appendChild(cpop);
+  let cpopAnchor = null;
+  function closeColorPop() { cpop.hidden = true; cpopAnchor = null; }
+  function openColorPop(anchor, mode, id) {
+    if (cpopAnchor === anchor && !cpop.hidden) { closeColorPop(); return; }
+    cpopAnchor = anchor;
+    if (mode === "set") {
+      const c = S.contacts.get(id); if (!c) return;
+      const cur = (c.custom || {})._color || "";
+      cpop.setAttribute("aria-label", "Farbe wählen");
+      cpop.innerHTML = `<h4>Farbe für ${esc(c.name || "Kontakt")}</h4><div class="cgrid">${NAME_COLORS.map((x) => `<button type="button" class="cswatch" style="--nc: ${x.hex}" data-pick="${x.id}" data-pid="${id}" aria-pressed="${cur === x.id}" title="${esc(x.label)}" aria-label="${esc(x.label)}"></button>`).join("")}<button type="button" class="cswatch none" data-pick="" data-pid="${id}" aria-pressed="${!cur}" title="Keine Farbe" aria-label="Keine Farbe"></button></div>`;
+    } else {
+      const inL = inList(S.list), cnt = (k) => inL.filter((c) => k === "none" ? !nameColor(c) : (c.custom || {})._color === k).length;
+      const row = (val, dot, label, n) => `<button type="button" data-fpick="${val}" aria-pressed="${S.color === val}" class="${n === 0 ? "zero" : ""}">${dot}<span>${esc(label)}</span>${n == null ? "" : `<span class="n">${n}</span>`}</button>`;
+      cpop.setAttribute("aria-label", "Nach Farbe filtern");
+      cpop.innerHTML = `<h4>Nach Farbe filtern</h4><div class="clist">${row("", `<span class="dot all"></span>`, "Alle Farben", inL.length)}${NAME_COLORS.map((x) => row(x.id, `<span class="dot" style="--nc: ${x.hex}"></span>`, x.label, cnt(x.id))).join("")}${row("none", `<span class="dot none"></span>`, "Ohne Farbe", cnt("none"))}</div>`;
+    }
+    cpop.hidden = false;
+    const r = anchor.getBoundingClientRect(), w = cpop.offsetWidth, h = cpop.offsetHeight;
+    let left = Math.min(Math.max(8, r.left - 6), window.innerWidth - w - 8);
+    let top = r.bottom + 6;
+    if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 6);
+    cpop.style.left = left + "px"; cpop.style.top = top + "px";
+    cpop.querySelector('[aria-pressed="true"]')?.focus({ preventScroll: true });
+  }
+  $("colorF").addEventListener("click", (e) => openColorPop(e.currentTarget, "filter"));
+  cpop.addEventListener("click", (e) => {
+    const t = e.target.closest("button"); if (!t) return;
+    if (t.dataset.pid) { const id = t.dataset.pid; closeColorPop(); setNameColor(id, t.dataset.pick); }
+    else if (t.dataset.fpick != null) { S.color = t.dataset.fpick; closeColorPop(); renderAll(); }
+  });
+  document.addEventListener("pointerdown", (e) => { if (!cpop.hidden && !cpop.contains(e.target) && !(cpopAnchor && cpopAnchor.contains(e.target))) closeColorPop(); }, true);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !cpop.hidden) { const a = cpopAnchor; closeColorPop(); a?.focus?.(); } });
+  window.addEventListener("resize", closeColorPop);
+  $("tableBox").addEventListener("scroll", () => { if (!cpop.hidden) closeColorPop(); }, { passive: true });
   $("btnAdd").addEventListener("click", () => addContact());
   $("btnImport").addEventListener("click", () => openPanel("import"));
   $("btnFields").addEventListener("click", () => openPanel("fields"));
@@ -2695,11 +2793,19 @@ window.KONTAKT_CONFIG = {
     else if (t.dataset.open) openPanel("contact", t.dataset.open);
     else if (t.dataset.act === "add") addContact();
     else if (t.dataset.act === "import") openPanel("import");
-    else if (t.dataset.act === "reset") { S.q = ""; $("q").value = ""; S.soz = ""; S.dueOnly = false; renderAll(); }
+    else if (t.dataset.act === "reset") { S.q = ""; $("q").value = ""; S.soz = ""; S.color = ""; S.dueOnly = false; renderAll(); }
+    else if (t.dataset.ncolor) openColorPop(t, "set", t.dataset.ncolor);
   });
   $("bulk").addEventListener("change", (e) => {
     const target = e.target.value; if (!target) return;
     const ids = [...S.selected].filter((id) => S.contacts.has(id));
+    if (e.target.id === "bulkColor") {
+      const col = NAME_COLORS.find((x) => x.id === target);
+      for (const id of ids) setNameColor(id, col ? col.id : "", true);
+      S.selected.clear(); renderAll();
+      toast(`${ids.length} ${ids.length === 1 ? "Kontakt" : "Kontakte"} ${col ? col.label + " markiert" : "ohne Farbe"}.`);
+      return;
+    }
     const move = e.target.id === "bulkMove";
     for (const id of ids) {
       const c = S.contacts.get(id);
@@ -2815,7 +2921,7 @@ window.KONTAKT_CONFIG = {
   });
   let armed = null;
   ov.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-act], [data-toggle], [data-del], [data-fdel], [data-ldel], [data-cal], [data-svcal], #impGo");
+    const t = e.target.closest("[data-act], [data-toggle], [data-del], [data-fdel], [data-ldel], [data-cal], [data-svcal], [data-dcolor], #impGo");
     if (!t) return;
     if (t.dataset.ldel) {
       const key = "l:" + t.dataset.ldel, l = S.customLists.find((x) => x.id === t.dataset.ldel); if (!l) return;
@@ -2838,6 +2944,11 @@ window.KONTAKT_CONFIG = {
     if (t.dataset.svcal) return serviceToCalendar(t.dataset.svcal);
     if (t.dataset.act === "close") return closePanel();
     if (t.id === "impGo") return runImport();
+    if (t.dataset.dcolor) {
+      setNameColor(t.dataset.dcolor, t.dataset.c);
+      ov.querySelectorAll("[data-dcolor]").forEach((b) => b.setAttribute("aria-pressed", String(b === t)));
+      return;
+    }
     if (t.dataset.toggle) {
       toggleList(t.dataset.toggle, t.dataset.list);
       const c = S.contacts.get(t.dataset.toggle);
