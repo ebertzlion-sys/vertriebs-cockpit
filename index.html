@@ -1026,7 +1026,7 @@ window.KONTAKT_CONFIG = {
     if (S.channel) { S.sb.removeChannel(S.channel); S.channel = null; }
     if (C.channel) { S.sb.removeChannel(C.channel); C.channel = null; C.loaded = false; }
     await S.sb.auth.signOut();
-    S.me = null; S.owner = null; S.contacts = new Map();
+    S.me = null; S.owner = null; S.contacts = new Map(); C.caldav = undefined;
     showAuth("login", "Du bist abgemeldet.");
   }
   $("btnLogout").addEventListener("click", logout);
@@ -1590,9 +1590,18 @@ window.KONTAKT_CONFIG = {
   document.addEventListener("pointerdown", (e) => { const p = $("calPop"); if (p && !p.contains(e.target) && !e.target.closest(".cal-btn")) calPopClose(); });
   window.addEventListener("scroll", calPopPlace, true);
   window.addEventListener("resize", calPopPlace);
-  function addToCalendar(id, opts) {
+  async function caldavEnsure() {
+    // Die iCloud-Anbindung wird sonst erst mit dem Kalender geladen. Ohne sie käme beim Eintragen nur die .ics-Datei.
+    if (C.caldav !== undefined || !S.sb || !S.me) return;
+    try {
+      const { data, error } = await S.sb.from("caldav_account").select("apple_id, calendars, default_url").eq("owner", S.me.id).maybeSingle();
+      if (C.caldav === undefined) C.caldav = error ? null : data || false;
+    } catch { /* offline: dann eben die Datei */ }
+  }
+  async function addToCalendar(id, opts) {
     const c = S.contacts.get(id); if (!c) return;
     if (!c.nextDate) { toast("Trag zuerst bei „Fällig am“ ein Datum ein."); return; }
+    await caldavEnsure();
     const time = opts ? opts.time || "" : (($("calTime") && S.openId === id && $("calTime").value) || "");
     const dur = opts ? Number(opts.dur) || 60 : Number(($("calDur") && S.openId === id && $("calDur").value) || 60);
     const d = c.nextDate.replace(/-/g, "");
@@ -1887,8 +1896,9 @@ window.KONTAKT_CONFIG = {
     a.download = filename;
     document.body.appendChild(a); a.click(); a.remove();
   }
-  function serviceToCalendar(id) {
+  async function serviceToCalendar(id) {
     const c = S.contacts.get(id); const n = c && serviceNext(c); if (!n) return;
+    await caldavEnsure();
     calIcsDownload([{ uid: "service-" + id + "-" + n, s: new Date(n + "T12:00:00"), allDay: true, title: `Service-Termin – ${c.name || "Kunde"}`, desc: [c.beruf, c.info].filter(Boolean).join("\n") }], `Service-${(c.name || "Kunde").replace(/[^\wäöüÄÖÜß-]+/g, "-")}-${n}.ics`);
   }
   function bookingEvent(b) {
